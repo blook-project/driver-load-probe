@@ -1,6 +1,8 @@
 {
     cmdlines = {
         "xmake -y",
-        [[xmake lua Y:\Users\mbcloud\xmake\modules\private\utils\statistics.lua --yes]]
+        [[xmake lua Y:\Users\mbcloud\xmake\modules\private\utils\statistics.lua --yes]],
+        [[xmake f -c -y -m release "--wdk=Y:\\Program Files (x86)\\Windows Kits\\10"]],
+        "xmake -y"
     }
 }
