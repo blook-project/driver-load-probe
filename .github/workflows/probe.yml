@@ -26,16 +26,30 @@ jobs:
           bcdedit /enum '{current}' 2>&1 | Select-String -Pattern 'testsigning|nointegritychecks|flightsigning' | ForEach-Object { $_.Line.Trim() }
           try { "SecureBoot=$(Confirm-SecureBootUEFI 2>&1)" } catch { "SecureBoot=unavailable" }
           "sha1_spc=$((Get-FileHash artifact\probe_driver.sys -Algorithm SHA256).Hash)"
-          "min_sha256=$((Get-FileHash artifact\probe_min.sys -Algorithm SHA256).Hash)"
+          "min_sha256=$((Get-FileHash artifact\probe_min_spc.sys -Algorithm SHA256).Hash)"
           $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1 -ExpandProperty FullName
-          if ($st) { & $st verify /v /pa artifact\probe_min.sys 2>&1 | Select-Object -Last 8; "signtool_exit=$LASTEXITCODE" }
+          if ($st) { & $st verify /v /pa artifact\probe_min_spc.sys 2>&1 | Select-Object -Last 8; "signtool_exit=$LASTEXITCODE" }
           $global:LASTEXITCODE = 0
           exit 0
 
-      - name: Create service (minimal test-signed driver)
+      - name: Import signing trust (TSA root + Verisign CA + XINDA leaf)
         shell: pwsh
         run: |
-          $sys = (Resolve-Path 'artifact\probe_min.sys').Path
+          certutil -addstore -f root signer\tsa\tsa-root.cer
+          certutil -addstore -f CA signer\certs\verisign-cscs-2010.cer
+          certutil -addstore -f CA signer\certs\verisign-g5-mcvr.cer
+          $leaf = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -match 'XINDA' } | Select-Object -First 1
+          if ($leaf) { certutil -addstore -f TrustedPublisher $leaf.Thumbprint }
+          $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1 -ExpandProperty FullName
+          & $st verify /kp /v artifact\probe_min_spc.sys 2>&1 | Select-Object -Last 12
+          "kp_verify_exit=$LASTEXITCODE"
+          $global:LASTEXITCODE = 0
+          exit 0
+
+      - name: Create service (SPC SHA-1 minimal driver)
+        shell: pwsh
+        run: |
+          $sys = (Resolve-Path 'artifact\probe_min_spc.sys').Path
           $p = Start-Process -FilePath sc.exe -ArgumentList @('create','blookprobe','type=','kernel',"binPath= $sys",'start=','demand') -NoNewWindow -PassThru
           if (-not $p.WaitForExit(15000)) { $p.Kill(); "CREATE_HUNG"; exit 0 }
           "create_exit=$($p.ExitCode)"
@@ -84,4 +98,5 @@ jobs:
                   Select-Object TimeCreated,Id,LevelDisplayName | Format-Table | Out-String } catch { "codeintegrity_unavailable" }
           $global:LASTEXITCODE = 0
           exit 0
+
 
