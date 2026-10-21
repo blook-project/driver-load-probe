@@ -1,0 +1,11 @@
+{
+    mtimes = {
+        ["xmake.lua"] = 1792579885
+    },
+    recheck = false,
+    options = {
+        mode = "release",
+        clean = true,
+        wdk = [[Y:\Program Files (x86)\Windows Kits\10]]
+    }
+}

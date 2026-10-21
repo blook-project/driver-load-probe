@@ -1,0 +1,27 @@
+[Version]
+Signature="$Windows NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%ManufacturerName%
+DriverVer=01/01/2026,1.0.0.0
+
+[Manufacturer]
+%ManufacturerName%=Standard,NTamd64
+
+[Standard.NTamd64]
+%DeviceName%=Probe_Install,root\blookprobe
+
+[Probe_Install]
+AddService=blookprobe,%SPSVCINST_ASSOCSERVICE%,Probe_Service
+
+[Probe_Service]
+DisplayName=%ServiceName%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\blookprobe.sys
+
+[Strings]
+ManufacturerName="blook-project"
+DeviceName="blook driver load probe"
+ServiceName="blookprobe"

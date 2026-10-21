@@ -1,0 +1,93 @@
+{
+    find_program = {
+        ["Y:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\cl.exe"] = [[y:\program files\microsoft visual studio\18\community\vc\tools\msvc\14.50.35717\bin\hostx64\x64\cl.exe]],
+        dotnet = [[Y:\Program Files\dotnet\dotnet.exe]],
+        nim = false,
+        ["cl.exe"] = [[Y:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\cl.exe]],
+        zig = false,
+        mofcomp = [[Y:\Windows\System32\wbem\mofcomp.exe]]
+    },
+    find_program_msvc_arch_x64_plat_windows_checktoolld = {
+        ["link.exe"] = [[Y:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\link.exe]]
+    },
+    ["detect.sdks.find_wdk"] = {
+        wdk = {
+            includedir = [[Y:\Program Files (x86)\Windows Kits\10\Include]],
+            sdkver = "10.0.26100.0",
+            bindir = [[Y:\Program Files (x86)\Windows Kits\10\bin]],
+            umdfver = "2.0",
+            kmdfver = "1.11",
+            sdkdir = [[Y:\Program Files (x86)\Windows Kits\10]],
+            libdir = [[Y:\Program Files (x86)\Windows Kits\10\Lib]]
+        }
+    },
+    ["detect.sdks.find_dotnet"] = {
+        dotnet = {
+            sdkdir = [[Y:\Program Files\dotnet\sdk\10.0.201]],
+            sdkver = "10.0.201",
+            bindir = [[Y:\Program Files\dotnet]],
+            version = "10.0.201",
+            runtimes = {
+                {
+                    version = "10.0.5",
+                    name = "Microsoft.AspNetCore.App"
+                },
+                {
+                    version = "6.0.11",
+                    name = "Microsoft.NETCore.App"
+                },
+                {
+                    version = "6.0.36",
+                    name = "Microsoft.NETCore.App"
+                },
+                {
+                    version = "8.0.19",
+                    name = "Microsoft.NETCore.App"
+                },
+                {
+                    version = "10.0.5",
+                    name = "Microsoft.NETCore.App"
+                },
+                {
+                    version = "6.0.11",
+                    name = "Microsoft.WindowsDesktop.App"
+                },
+                {
+                    version = "8.0.19",
+                    name = "Microsoft.WindowsDesktop.App"
+                },
+                {
+                    version = "10.0.5",
+                    name = "Microsoft.WindowsDesktop.App"
+                }
+            },
+            netfxsdk = {
+                sdkdir = [[Y:\Program Files (x86)\Windows Kits\NETFXSDK]],
+                sdkver = "4.8",
+                includedir = [[Y:\Program Files (x86)\Windows Kits\NETFXSDK\4.8\Include]],
+                libdir = [[Y:\Program Files (x86)\Windows Kits\NETFXSDK\4.8\Lib]]
+            },
+            sdks = {
+                {
+                    version = "10.0.201",
+                    directory = [[Y:\Program Files\dotnet\sdk\10.0.201]]
+                }
+            }
+        }
+    },
+    find_programver = {
+        ["Y:\\Program Files\\dotnet\\dotnet.exe"] = "10.0.201"
+    },
+    ["lib.detect.has_flags"] = {
+        ["windows_x64_y:\\program files\\microsoft visual studio\\18\\community\\vc\\tools\\msvc\\14.50.35717\\bin\\hostx64\\x64\\cl.exe__cxx_cxflags_-nologo_-DNDEBUG"] = true,
+        ["windows_x64_y:\\program files\\microsoft visual studio\\18\\community\\vc\\tools\\msvc\\14.50.35717\\bin\\hostx64\\x64\\cl.exe__cxx__-nologo_-O2"] = true,
+        ["windows_x64_y:\\program files\\microsoft visual studio\\18\\community\\vc\\tools\\msvc\\14.50.35717\\bin\\hostx64\\x64\\cl.exe__cxx_cxflags_-nologo_cl_external_includedir"] = true,
+        ["windows_x64_y:\\program files\\microsoft visual studio\\18\\community\\vc\\tools\\msvc\\14.50.35717\\bin\\hostx64\\x64\\cl.exe__cxx_cxflags_-nologo_cl_sourceDependencies"] = true
+    },
+    find_program_msvc_arch_x64_plat_windows_checktoolcxx = {
+        ["cl.exe"] = [[Y:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\cl.exe]]
+    },
+    find_program_msvc_arch_x64_plat_windows_checktoolcc = {
+        ["cl.exe"] = [[Y:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\cl.exe]]
+    }
+}
