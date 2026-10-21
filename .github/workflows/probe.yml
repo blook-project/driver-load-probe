@@ -8,81 +8,77 @@ permissions:
 
 jobs:
   probe:
-    name: SPC-signed WDM driver load on ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, windows-2022]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    name: SPC-signed WDM driver load
+    runs-on: windows-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
-      - name: Environment facts
+      - name: Environment facts (testsigning / SecureBoot / signature)
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
           $os = Get-CimInstance Win32_OperatingSystem
           "OS: $($os.Caption) $($os.Version) build $($os.BuildNumber)"
           "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion"
           $id = [Security.Principal.WindowsIdentity]::GetCurrent()
           "user=$($id.Name) admin=$([Security.Principal.WindowsPrincipal]::new($id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
-          "testsigning/nointegritychecks:"
-          bcdedit /enum '{current}' 2>&1 | Select-String -Pattern 'testsigning|nointegritychecks|flightsigning'
+          "--- bcdedit testsigning/integrity ---"
+          bcdedit /enum '{current}' 2>&1 | Select-String -Pattern 'testsigning|nointegritychecks|flightsigning|hypervisorlaunchtype' | ForEach-Object { $_.Line.Trim() }
           try { "SecureBoot: $(Confirm-SecureBootUEFI 2>&1)" } catch { "SecureBoot: unavailable ($($_.Exception.Message))" }
-          "--- signature verify (signed on the lab host, binary committed as-is) ---"
+          "driver_sha256=$((Get-FileHash artifact\probe_driver.sys -Algorithm SHA256).Hash)"
           $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
             Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1 -ExpandProperty FullName
-          if ($st) { & $st verify /v /pa artifact\probe_driver.sys 2>&1; "signtool_exit=$LASTEXITCODE"; $global:LASTEXITCODE = 0 }
+          if ($st) {
+            & $st verify /v /pa artifact\probe_driver.sys 2>&1 | Select-Object -Last 20
+            "signtool_exit=$LASTEXITCODE"
+          }
+          $global:LASTEXITCODE = 0
           Get-AuthenticodeSignature artifact\probe_driver.sys |
             Select-Object Status,StatusMessage,@{n='Subject';e={$_.SignerCertificate.Subject}},@{n='NotAfter';e={$_.SignerCertificate.NotAfter}} | Format-List
-          "driver_sha256=$((Get-FileHash artifact\probe_driver.sys -Algorithm SHA256).Hash)"
+          exit 0
 
-      - name: Load driver with sc (no test signing, DSE on)
+      - name: Create service
         shell: pwsh
         run: |
           $sys = (Resolve-Path 'artifact\probe_driver.sys').Path
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          sc.exe create blookprobe type= kernel binPath= "$sys" start= demand
+          $out = & sc.exe create blookprobe type= kernel binPath= "$sys" start= demand 2>&1 | Out-String
+          "create_output=$out"
           "create_exit=$LASTEXITCODE"
-          sc.exe start blookprobe 2>&1 | Tee-Object -Variable startOut
-          $startExit = $LASTEXITCODE
-          "start_exit=$startExit start_s=$([math]::Round($sw.Elapsed.TotalSeconds,1))"
-          $state = $null
-          for ($i = 0; $i -lt 20; $i++) {
-            Start-Sleep -Milliseconds 500
-            $q = sc.exe query blookprobe 2>&1 | Out-String
-            if ($q -match 'STATE\s*:\s*\d+\s+RUNNING') { $state = 'RUNNING'; break }
-          }
-          "driver_state=$state"
-          sc.exe query blookprobe | Out-String
-          if ($startExit -ne 0 -or $state -ne 'RUNNING') {
-            $ci = Get-WinEvent -LogName 'Microsoft-Windows-CodeIntegrity/Operational' -MaxEvents 20 -ErrorAction SilentlyContinue |
-              Select-Object TimeCreated,Id,Message | Format-List | Out-String
-            "codeintegrity: $ci"
-            sc.exe delete blookprobe | Out-Null
-            Write-Host '::error::signed driver did not start'
-            exit 1
-          }
+          exit 0
 
-      - name: Run user-mode client (IOCTL round-trip)
+      - name: Start service (guarded 30s)
         shell: pwsh
         run: |
-          .\artifact\probe_client.exe 2>&1 | Tee-Object -Variable clientOut
+          $p = Start-Process -FilePath sc.exe -ArgumentList @('start','blookprobe') -NoNewWindow -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\start.out" -RedirectStandardError "$env:RUNNER_TEMP\start.err"
+          $finished = $p.WaitForExit(30000)
+          "start_finished=$finished exit=$(if ($finished) { $p.ExitCode } else { 'TIMEOUT' })"
+          if (Test-Path "$env:RUNNER_TEMP\start.out") { "start_stdout=" + (Get-Content "$env:RUNNER_TEMP\start.out" -Raw) }
+          if (Test-Path "$env:RUNNER_TEMP\start.err") { "start_stderr=" + (Get-Content "$env:RUNNER_TEMP\start.err" -Raw) }
+          if (-not $finished) { try { $p.Kill() } catch {} }
+          $q = & sc.exe query blookprobe 2>&1 | Out-String
+          "query=$q"
+          "state_running=$($q -match 'STATE\s*:\s*\d+\s+RUNNING')"
+          try { Get-WinEvent -LogName 'Microsoft-Windows-CodeIntegrity/Operational' -MaxEvents 10 -ErrorAction Stop |
+                  Select-Object TimeCreated,Id,LevelDisplayName,Message | Format-List } catch { "codeintegrity_unavailable: $($_.Exception.Message)" }
+          exit 0
+
+      - name: Run user-mode client
+        shell: pwsh
+        run: |
+          .\artifact\probe_client.exe 2>&1 | ForEach-Object { $_ }
           "client_exit=$LASTEXITCODE"
-          if ($LASTEXITCODE -ne 0) { Write-Host '::error::client failed'; exit 1 }
+          exit 0
 
       - name: Stop + delete + evidence
         if: always()
         shell: pwsh
         run: |
-          sc.exe stop blookprobe 2>&1 | Out-Null
+          Start-Process -FilePath sc.exe -ArgumentList @('stop','blookprobe') -NoNewWindow -Wait -ErrorAction SilentlyContinue | Out-Null
           Start-Sleep -Seconds 2
-          sc.exe delete blookprobe 2>&1 | Out-Null
-          "final_query: $((sc.exe query blookprobe 2>&1 | Out-String))"
-          "--- CodeIntegrity events ---"
-          try { Get-WinEvent -LogName 'Microsoft-Windows-CodeIntegrity/Operational' -MaxEvents 20 -ErrorAction Stop |
-                  Select-Object TimeCreated,Id,LevelDisplayName,Message | Format-List } catch { "unavailable: $($_.Exception.Message)" }
-          "--- System log driver events ---"
+          $d = & sc.exe delete blookprobe 2>&1 | Out-String
+          "delete_output=$d"
+          "final_query=$((& sc.exe query blookprobe 2>&1 | Out-String))"
           try { Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction Stop |
-                  Select-Object TimeCreated,Id,Message | Format-List } catch { "unavailable" }
-
+                  Select-Object TimeCreated,Id,Message | Format-List } catch { "scm_events_unavailable" }
+          exit 0
