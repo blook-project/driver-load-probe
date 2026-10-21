@@ -8,8 +8,12 @@ permissions:
 
 jobs:
   probe:
-    name: SPC-signed WDM driver load on windows-latest
-    runs-on: windows-latest
+    name: SPC-signed WDM driver load on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +32,7 @@ jobs:
           "--- signature verify (signed on the lab host, binary committed as-is) ---"
           $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
             Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1 -ExpandProperty FullName
-          if ($st) { & $st verify /v /pa artifact\probe_driver.sys 2>&1; "signtool_exit=$LASTEXITCODE" }
+          if ($st) { & $st verify /v /pa artifact\probe_driver.sys 2>&1; "signtool_exit=$LASTEXITCODE"; $global:LASTEXITCODE = 0 }
           Get-AuthenticodeSignature artifact\probe_driver.sys |
             Select-Object Status,StatusMessage,@{n='Subject';e={$_.SignerCertificate.Subject}},@{n='NotAfter';e={$_.SignerCertificate.NotAfter}} | Format-List
           "driver_sha256=$((Get-FileHash artifact\probe_driver.sys -Algorithm SHA256).Hash)"
@@ -81,3 +85,4 @@ jobs:
           "--- System log driver events ---"
           try { Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction Stop |
                   Select-Object TimeCreated,Id,Message | Format-List } catch { "unavailable" }
+
