@@ -10,22 +10,9 @@ jobs:
   probe:
     name: SPC-signed WDM driver load on windows-latest
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup xmake
-        uses: xmake-io/github-action-setup-xmake@v1
-
-      - name: Install WDK (NuGet content)
-        shell: pwsh
-        run: |
-          $ver = '10.0.26100.6584'
-          $dst = "$env:RUNNER_TEMP\wdk"
-          New-Item -ItemType Directory -Force $dst | Out-Null
-          Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/microsoft.windows.wdk.x64/$ver/microsoft.windows.wdk.x64.$ver.nupkg" -OutFile "$dst\wdk.nupkg"
-          tar.exe -xf "$dst\wdk.nupkg" -C $dst
-          "WDK_ROOT=$dst\c" >> $env:GITHUB_ENV
 
       - name: Environment facts
         shell: pwsh
@@ -33,42 +20,31 @@ jobs:
           $os = Get-CimInstance Win32_OperatingSystem
           "OS: $($os.Caption) $($os.Version) build $($os.BuildNumber)"
           "ImageOS=$env:ImageOS ImageVersion=$env:ImageVersion"
-          "runner user: $env:USERNAME admin=$([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
-          bcdedit /enum '{current}' 2>&1 | Select-String -Pattern 'testsigning|nointegritychecks|hypervisorlaunchtype|flightsigning'
-          try { "SecureBoot=$((Confirm-SecureBootUEFI 2>&1))" } catch { "SecureBoot=unavailable ($($_.Exception.Message))" }
-          bcdedit /enum '{current}' | Out-File "$env:RUNNER_TEMP\bcdedit.txt"
-
-      - name: Build driver + client
-        shell: pwsh
-        run: |
-          xmake f -c -y -m release --wdk="$env:WDK_ROOT"
-          xmake -y
-          Get-ChildItem build\windows\x64\release | Select-Object Name,Length
-
-      - name: Sign driver with repo SPC signer
-        shell: pwsh
-        run: |
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          pwsh -NoProfile -File scripts/sign-driver.ps1
-          "sign_s=$([math]::Round($sw.Elapsed.TotalSeconds,1))"
-          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+          $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+          "user=$($id.Name) admin=$([Security.Principal.WindowsPrincipal]::new($id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          "testsigning/nointegritychecks:"
+          bcdedit /enum '{current}' 2>&1 | Select-String -Pattern 'testsigning|nointegritychecks|flightsigning'
+          try { "SecureBoot: $(Confirm-SecureBootUEFI 2>&1)" } catch { "SecureBoot: unavailable ($($_.Exception.Message))" }
+          "--- signature verify (signed on the lab host, binary committed as-is) ---"
+          $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
             Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1 -ExpandProperty FullName
-          if ($signtool) { & $signtool verify /v /pa build\windows\x64\release\probe_driver.sys 2>&1; "signtool_exit=$LASTEXITCODE" }
-          Get-AuthenticodeSignature build\windows\x64\release\probe_driver.sys |
+          if ($st) { & $st verify /v /pa artifact\probe_driver.sys 2>&1; "signtool_exit=$LASTEXITCODE" }
+          Get-AuthenticodeSignature artifact\probe_driver.sys |
             Select-Object Status,StatusMessage,@{n='Subject';e={$_.SignerCertificate.Subject}},@{n='NotAfter';e={$_.SignerCertificate.NotAfter}} | Format-List
+          "driver_sha256=$((Get-FileHash artifact\probe_driver.sys -Algorithm SHA256).Hash)"
 
-      - name: Load driver with sc (no test signing)
+      - name: Load driver with sc (no test signing, DSE on)
         shell: pwsh
         run: |
-          $sys = (Resolve-Path 'build\windows\x64\release\probe_driver.sys').Path
+          $sys = (Resolve-Path 'artifact\probe_driver.sys').Path
+          $sw = [Diagnostics.Stopwatch]::StartNew()
           sc.exe create blookprobe type= kernel binPath= "$sys" start= demand
           "create_exit=$LASTEXITCODE"
-          $sw = [Diagnostics.Stopwatch]::StartNew()
           sc.exe start blookprobe 2>&1 | Tee-Object -Variable startOut
           $startExit = $LASTEXITCODE
           "start_exit=$startExit start_s=$([math]::Round($sw.Elapsed.TotalSeconds,1))"
           $state = $null
-          for ($i = 0; $i -lt 15; $i++) {
+          for ($i = 0; $i -lt 20; $i++) {
             Start-Sleep -Milliseconds 500
             $q = sc.exe query blookprobe 2>&1 | Out-String
             if ($q -match 'STATE\s*:\s*\d+\s+RUNNING') { $state = 'RUNNING'; break }
@@ -76,15 +52,18 @@ jobs:
           "driver_state=$state"
           sc.exe query blookprobe | Out-String
           if ($startExit -ne 0 -or $state -ne 'RUNNING') {
+            $ci = Get-WinEvent -LogName 'Microsoft-Windows-CodeIntegrity/Operational' -MaxEvents 20 -ErrorAction SilentlyContinue |
+              Select-Object TimeCreated,Id,Message | Format-List | Out-String
+            "codeintegrity: $ci"
             sc.exe delete blookprobe | Out-Null
             Write-Host '::error::signed driver did not start'
             exit 1
           }
 
-      - name: Run user-mode client
+      - name: Run user-mode client (IOCTL round-trip)
         shell: pwsh
         run: |
-          .\build\windows\x64\release\probe_client.exe 2>&1 | Tee-Object -Variable clientOut
+          .\artifact\probe_client.exe 2>&1 | Tee-Object -Variable clientOut
           "client_exit=$LASTEXITCODE"
           if ($LASTEXITCODE -ne 0) { Write-Host '::error::client failed'; exit 1 }
 
@@ -95,18 +74,10 @@ jobs:
           sc.exe stop blookprobe 2>&1 | Out-Null
           Start-Sleep -Seconds 2
           sc.exe delete blookprobe 2>&1 | Out-Null
-          "final_state=$((sc.exe query blookprobe 2>&1 | Out-String))"
-          try {
-            Get-WinEvent -LogName 'Microsoft-Windows-CodeIntegrity/Operational' -MaxEvents 30 -ErrorAction Stop |
-              Select-Object TimeCreated,Id,LevelDisplayName,Message | Format-List
-          } catch { "codeintegrity_events_unavailable: $($_.Exception.Message)" }
-          bcdedit /enum '{current}' | Out-File "$env:RUNNER_TEMP\bcdedit.txt"
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: signed-driver-load-logs
-          path: |
-            ${{ runner.temp }}/bcdedit.txt
-          if-no-files-found: warn
+          "final_query: $((sc.exe query blookprobe 2>&1 | Out-String))"
+          "--- CodeIntegrity events ---"
+          try { Get-WinEvent -LogName 'Microsoft-Windows-CodeIntegrity/Operational' -MaxEvents 20 -ErrorAction Stop |
+                  Select-Object TimeCreated,Id,LevelDisplayName,Message | Format-List } catch { "unavailable: $($_.Exception.Message)" }
+          "--- System log driver events ---"
+          try { Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction Stop |
+                  Select-Object TimeCreated,Id,Message | Format-List } catch { "unavailable" }
